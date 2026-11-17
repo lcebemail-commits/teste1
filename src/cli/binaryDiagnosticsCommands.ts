@@ -14,6 +14,7 @@ import {
   createPeResourcesService,
   createPeCertificatesService,
   createPeImportsService,
+  createPeRichHeaderService,
   createWindowsShortcutService,
   createNativeExportsService,
 } from "../composition/binaryDiagnostics.js";
@@ -231,6 +232,19 @@ export const registerBinaryDiagnosticsCommands = (
       fields: { path: { description: "Local PE32/PE32+ image" } },
     },
     inspectWithService(createPeImportsService, "rea-pe-imports"),
+  );
+  registerContractCommand(
+    cli,
+    logger,
+    contract("inspect_pe_rich_header"),
+    {
+      description:
+        "Inspect PE Rich header linker records without executing the image",
+      positionals: ["path"],
+      callerPaths: ["path"],
+      fields: { path: { description: "Local PE32/PE32+ image" } },
+    },
+    inspectWithService(createPeRichHeaderService, "rea-pe-rich-header"),
   );
   registerContractCommand(
     cli,
