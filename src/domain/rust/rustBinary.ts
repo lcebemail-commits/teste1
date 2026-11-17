@@ -43,9 +43,17 @@ const dependencyEdgeSchema = z.strictObject({
   to_index: index,
 });
 
+const DEPENDENCY_SECTION_NAMES = [".dep-v0", "__DATA,.dep-v0"] as const;
+
+/** The dependency section's name in a container: Mach-O qualifies it with its segment. */
+export const rustDependencySectionName = (
+  format: "elf" | "pe" | "macho" | "wasm",
+): (typeof DEPENDENCY_SECTION_NAMES)[number] =>
+  format === "macho" ? "__DATA,.dep-v0" : ".dep-v0";
+
 /** zlib JSON from one `.dep-v0` section, in the section's package order. */
 export const rustAuditableMetadataSchema = z.strictObject({
-  section_name: z.enum([".dep-v0", "__DATA,.dep-v0"]),
+  section_name: z.enum(DEPENDENCY_SECTION_NAMES),
   file_offset: index,
   /** Stored section range, including accepted PE file-alignment bytes. */
   section_bytes: z.int().positive(),
@@ -148,9 +156,10 @@ export const rustBinarySchema = z
       sha256: digestSchema,
       bytes: index,
     }),
-    format: z.enum(["elf", "pe", "macho"]),
+    format: z.enum(["elf", "pe", "macho", "wasm"]),
     architecture: z.string(),
-    bits: z.union([z.literal(32), z.literal(64)]),
+    /** Native containers declare a word size; WebAssembly declares none. */
+    bits: z.union([z.literal(32), z.literal(64)]).nullable(),
     byte_order: z.enum(["little", "big"]),
     /** The universal slice that was read; file offsets stay inside it. */
     selected_slice: machoTargetSelectionSchema.exactOptional(),
@@ -164,8 +173,28 @@ export const rustBinarySchema = z
     limitations: z.array(z.string()),
   })
   .superRefine((report, context) => {
+    if ((report.format === "wasm") !== (report.bits === null))
+      issue(
+        context,
+        ["bits"],
+        "Word size is null exactly when the container is WebAssembly.",
+      );
+    if ((report.format === "wasm") !== (report.architecture === "wasm"))
+      issue(
+        context,
+        ["architecture"],
+        "Architecture is wasm exactly when the container is WebAssembly.",
+      );
+    if (report.format === "wasm" && report.byte_order !== "little")
+      issue(context, ["byte_order"], "A WebAssembly module is little-endian.");
     const metadata = report.auditable_metadata;
     if (metadata !== null) {
+      if (metadata.section_name !== rustDependencySectionName(report.format))
+        issue(
+          context,
+          ["auditable_metadata", "section_name"],
+          "Dependency section name does not belong to the report's container.",
+        );
       checkSection(report.artifact.bytes, metadata, context);
       checkPackages(metadata, context);
     }
