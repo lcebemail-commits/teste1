@@ -527,9 +527,11 @@ describe("untrusted provenance on failed tool results", () => {
       error: {
         details: {
           partial_observation: {
-            kind: "inline-evidence",
-            retention: "unknown",
+            kind: "unretained-evidence",
             evidence,
+          },
+          retention_error: {
+            code: "evidence_integrity_mismatch",
           },
         },
       },
@@ -565,8 +567,11 @@ describe("untrusted provenance on failed tool results", () => {
           resources: ["session:fixture"],
           partial_observation_omitted: {
             reason: "mcp-response-limit",
-            retention: "unknown",
+            retention: "unretained",
             evidence_id: evidence.evidence_id,
+          },
+          retention_error: {
+            code: "evidence_integrity_mismatch",
           },
         },
       },
