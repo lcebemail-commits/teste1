@@ -569,6 +569,11 @@ export const documentationSections = [
         route: "/ci-analysis",
       },
       {
+        text: "Debian package inspection",
+        source: "deb-package.md",
+        route: "/deb-package",
+      },
+      {
         text: "Desktop installation directories",
         source: "desktop-applications.md",
         route: "/desktop-applications",
