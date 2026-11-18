@@ -108,6 +108,9 @@ const windowsPathEntries = (value: string): readonly string[] => {
 /** Image extensions Windows starts directly; anything else needs a host such as cmd.exe. */
 const WINDOWS_IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([".com", ".exe"]);
 
+/** Batch launchers started through cmd.exe when the caller sets `allowBatch`. */
+const WINDOWS_BATCH_EXTENSIONS: ReadonlySet<string> = new Set([".bat", ".cmd"]);
+
 /** A PATHEXT entry that is not a filename extension, so the search is unknown. */
 export interface WindowsPathSearchFailure {
   readonly kind: "invalid_extension";
@@ -146,9 +149,13 @@ export const windowsPathCandidates = (
       );
   if (invalid !== undefined)
     return err({ kind: "invalid_extension", extension: invalid });
-  const runnable = (extension: string) =>
-    search.allowBatch === true ||
-    WINDOWS_IMAGE_EXTENSIONS.has(extension.toLowerCase());
+  const runnable = (extension: string) => {
+    const normalized = extension.toLowerCase();
+    return (
+      WINDOWS_IMAGE_EXTENSIONS.has(normalized) ||
+      (search.allowBatch === true && WINDOWS_BATCH_EXTENSIONS.has(normalized))
+    );
+  };
   const spelled = (command: string): string[] => {
     const explicit = win32.extname(command);
     if (explicit !== "") return runnable(explicit) ? [command] : [];
