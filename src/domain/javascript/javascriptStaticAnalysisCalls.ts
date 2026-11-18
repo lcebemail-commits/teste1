@@ -3,6 +3,7 @@ import {
   isFetchCall,
 } from "./javascriptNetworkRequests.js";
 import * as t from "@babel/types";
+import { isBuiltin } from "node:module";
 import {
   intrinsicPrototypeMemberMayHaveChanged,
   isIntrinsicMapLookup,
@@ -43,7 +44,10 @@ import type {
   JavaScriptFindingContext as FindingContext,
   JavaScriptReferenceInput as ReferenceInput,
 } from "./javascriptStaticAnalysisState.js";
-import { VITE_OUTPUT_DEPENDENCY_PREFIX } from "./javascriptStaticAnalysisTypes.js";
+import {
+  VITE_OUTPUT_DEPENDENCY_PREFIX,
+  type RequireResolveSearchPaths,
+} from "./javascriptStaticAnalysisTypes.js";
 import {
   resolveSemanticBindingState,
   semanticBindingLookupAt,
@@ -64,6 +68,7 @@ import {
   semanticTopLevelEffectFollowsCapture,
 } from "./javascriptSemanticMutationInitializers.js";
 import {
+  requireResolveSearchBase,
   semanticFactoryLoaderMemberAt,
   semanticRequireCallAt,
   semanticRequireLoaderAt,
@@ -126,6 +131,9 @@ export const inspectCall = (
       ...(requireCall.resolutionBasePath === undefined
         ? {}
         : { resolutionBasePath: requireCall.resolutionBasePath }),
+      ...(requireCall.resolutionSearchPaths === undefined
+        ? {}
+        : { resolutionSearchPaths: requireCall.resolutionSearchPaths }),
       ...(requireCall.loader === undefined
         ? {}
         : { loader: requireCall.loader }),
@@ -319,6 +327,7 @@ const requireCallSpecifier = (
   readonly specifier: string | undefined;
   readonly operation: "load" | "resolve";
   readonly resolutionBasePath?: string;
+  readonly resolutionSearchPaths?: RequireResolveSearchPaths;
   readonly loader?: "commonjs-loader" | "factory-loader" | "create-require";
   readonly loaderAuthority?: "candidate";
 } | null => {
@@ -343,12 +352,19 @@ const requireCallSpecifier = (
         : { loaderAuthority: "candidate" as const }),
     };
   }
+  const specifier = argumentValue(call.arguments?.[0]);
+  // Node resolves known builtins before it reads any search options.
+  const searchBase =
+    specifier !== undefined && isBuiltin(specifier)
+      ? "loader"
+      : requireResolveSearchBase(call, bindings);
   return {
     operation: call.operation,
-    specifier: argumentValue(call.arguments?.[0]),
+    specifier,
     ...(call.sourceRelativePath === undefined
       ? {}
       : { resolutionBasePath: call.sourceRelativePath }),
+    ...(searchBase === "loader" ? {} : { resolutionSearchPaths: searchBase }),
     // `factory-loader` names a bundle factory require, so its specifier is a
     // recovered module key rather than a package specifier.
     ...(call.loader === "commonjs-loader" ||
@@ -375,6 +391,9 @@ export const finishModuleRequireCalls = (
         ...(call.resolutionBasePath === undefined
           ? {}
           : { resolutionBasePath: call.resolutionBasePath }),
+        ...(call.resolutionSearchPaths === undefined
+          ? {}
+          : { resolutionSearchPaths: call.resolutionSearchPaths }),
         // A factory or `createRequire` loader saved under a member named `require`
         // still names a bundle module key, not a package. Dropping the loader here
         // would read that key as an external specifier.
@@ -1064,6 +1083,9 @@ export const addReference = (
       ...(input.resolutionBasePath === undefined
         ? {}
         : { resolution_base_path: input.resolutionBasePath }),
+      ...(input.resolutionSearchPaths === undefined
+        ? {}
+        : { resolution_search_paths: input.resolutionSearchPaths }),
       ...(input.loader === undefined ? {} : { loader: input.loader }),
       ...(input.loaderAuthority === undefined
         ? {}

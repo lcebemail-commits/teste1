@@ -348,7 +348,13 @@ const addReference = (
               "The module loader is unknown, so this dependency cannot be resolved against the source file.",
             ],
           }
-        : {}
+        : input.value.resolution_search_paths === "unknown"
+          ? {
+              limitations: [
+                "The require.resolve search path is unknown for the supplied options.",
+              ],
+            }
+          : {}
       : { limitations: resolved.limitations }),
   });
 };
@@ -746,7 +752,8 @@ const resolveReference = (
   coverage: JavaScriptArtifactGraphCoverage,
 ): ResolvedReference | null => {
   const specifier = reference.specifier;
-  if (specifier === null) return null;
+  if (specifier === null || reference.resolution_search_paths === "unknown")
+    return null;
   const isWorker =
     reference.kind === "worker" || reference.kind === "service-worker";
   const resolutionSourcePath =
@@ -804,6 +811,12 @@ const resolveReference = (
             declaredPath: specifier,
             sourcePath: resolutionSourcePath,
             context: "module-specifier",
+            ...(reference.resolution_search_paths === "package-scope"
+              ? { packageScopeOnly: true as const }
+              : reference.resolution_search_paths === "source-file" &&
+                  resolutionSourcePath !== sourcePath
+                ? { moduleSearchSourcePath: sourcePath }
+                : {}),
             files: context.filesByPath,
             jsonDocuments: context.analysis.jsonDocuments,
             directoryPaths: context.directoryPaths,

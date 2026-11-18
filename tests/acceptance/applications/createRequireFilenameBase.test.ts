@@ -1,3 +1,5 @@
+import { createRequire } from "node:module";
+import { join } from "node:path";
 import { expect } from "vitest";
 
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
@@ -46,6 +48,86 @@ console.log(JSON.stringify([nested("./dep.cjs"), current("./dep.cjs")]));`,
           resolved_path: "nested/dep.cjs",
         },
         { resolution_base_path: null, resolved_path: "dep.cjs" },
+      ]),
+    );
+  },
+);
+
+cliTest.for(["CLI", "stdio MCP"] as const)(
+  "retains package-scoped require.resolve lookups with an explicit path list through %s",
+  async (surface, { cli }) => {
+    const root = await createTestTempDirectory("rea-resolver-package-scope-");
+    const packageJson = (name: string) =>
+      JSON.stringify({
+        name,
+        imports: { "#dep": "./alias.cjs" },
+        exports: { "./self": "./self.cjs" },
+      });
+    const target =
+      'throw new Error("require.resolve must only look up a path");';
+    await writeFixtureFiles(root, {
+      "main.cjs": [
+        'require.resolve("#dep", { paths: [] });',
+        'require.resolve("root-fixture/self", { paths: [__dirname + "/nested"] });',
+        'require.resolve("./dep.cjs", { paths: [] });',
+        'require.resolve("./dep.cjs", { paths: [__dirname] });',
+        'require.resolve("./dep.cjs", { paths: [__dirname + "/sub"] });',
+      ].join("\n"),
+      "entry.mjs": [
+        'import { createRequire } from "node:module";',
+        'const nested = createRequire(new URL("./nested/anchor.cjs", import.meta.url));',
+        'nested.resolve("#dep", { paths: [] });',
+        'nested.resolve("nested-fixture/self", { paths: [] });',
+      ].join("\n"),
+      "package.json": packageJson("root-fixture"),
+      "alias.cjs": target,
+      "self.cjs": target,
+      "dep.cjs": target,
+      "sub/dep.cjs": target,
+      "nested/package.json": packageJson("nested-fixture"),
+      "nested/anchor.cjs": "",
+      "nested/alias.cjs": target,
+      "nested/self.cjs": target,
+    });
+
+    const resolve = createRequire(join(root, "main.cjs")).resolve;
+    expect(resolve("./dep.cjs", { paths: [join(root, "sub")] })).toBe(
+      join(root, "sub", "dep.cjs"),
+    );
+    expect(() => resolve("./dep.cjs", { paths: [] })).toThrow();
+
+    const { graph } = await analyzeJavaScriptDirectory(surface, cli, root);
+    const lookups = graph.edges.flatMap(({ properties, evidence }) => {
+      if (properties.operation !== "resolve" || !evidence.location.available)
+        return [];
+      const location = evidence.location.value;
+      if (location.kind !== "source-range") return [];
+      return [
+        {
+          call: location.source + ":" + String(location.start.line),
+          path: properties.resolved_path,
+          anchor: properties.resolution_base_path,
+        },
+      ];
+    });
+    expect(lookups).toHaveLength(7);
+    expect(lookups).toEqual(
+      expect.arrayContaining([
+        { call: "main.cjs:1", path: "alias.cjs", anchor: null },
+        { call: "main.cjs:2", path: "self.cjs", anchor: null },
+        { call: "main.cjs:3", path: null, anchor: null },
+        { call: "main.cjs:4", path: "dep.cjs", anchor: null },
+        { call: "main.cjs:5", path: null, anchor: null },
+        {
+          call: "entry.mjs:3",
+          path: "nested/alias.cjs",
+          anchor: "./nested/anchor.cjs",
+        },
+        {
+          call: "entry.mjs:4",
+          path: "nested/self.cjs",
+          anchor: "./nested/anchor.cjs",
+        },
       ]),
     );
   },
