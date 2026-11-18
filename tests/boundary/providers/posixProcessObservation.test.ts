@@ -1,8 +1,11 @@
+import { execFile } from "node:child_process";
 import { chmod, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
 import { expect, it } from "vitest";
 
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
+import { hasProcessStopped } from "../../support/process/hasProcessStopped.js";
 import { observePosixProcess } from "../../support/process/observePosixProcess.js";
 
 it.skipIf(process.platform === "win32")(
@@ -79,6 +82,70 @@ it.skipIf(process.platform === "win32")(
     } finally {
       if (previousPath === undefined) delete process.env.PATH;
       else process.env.PATH = previousPath;
+    }
+  },
+);
+
+it.skipIf(process.platform === "win32")(
+  "counts an exited descendant that waits to be reaped as stopped",
+  async () => {
+    // The parent forks a child that exits at once and does not wait for it
+    // until the test closes its stdin, so the child stays a zombie the way it
+    // would under a PID 1 that does not reap. The parent then calls waitpid, so
+    // the test leaves no zombie behind.
+    const parent = execFile(
+      "python3",
+      [
+        "-c",
+        `
+import os, sys
+pid = os.fork()
+if pid == 0:
+    os._exit(0)
+try:
+    print(pid, flush=True)
+    sys.stdin.buffer.read(1)
+finally:
+    os.waitpid(pid, 0)
+`,
+      ],
+      { timeout: 10_000 },
+    );
+    const finished = new Promise<void>((resolve, reject) => {
+      parent.once("error", reject);
+      parent.once("close", (code) =>
+        code === 0
+          ? resolve()
+          : reject(new Error(`Fixture parent exited with ${String(code)}`)),
+      );
+    });
+    // A rejection before the test awaits it would otherwise go unhandled.
+    finished.catch(() => undefined);
+    if (parent.stdout === null)
+      throw new Error("Fixture parent has no readiness pipe");
+    const lines = createInterface({ input: parent.stdout });
+    const ready = new Promise<number>((resolve, reject) => {
+      lines.once("line", (line) => {
+        lines.close();
+        resolve(Number(line.trim()));
+      });
+      finished.catch(reject);
+    });
+    try {
+      const zombie = await ready;
+      expect(Number.isSafeInteger(zombie)).toBe(true);
+      await expect
+        .poll(async () => (await observePosixProcess(zombie)).kind, {
+          interval: 25,
+        })
+        .toBe("zombie");
+      // Signal 0 still reaches a zombie, which is why it cannot show a stop.
+      expect(() => process.kill(zombie, 0)).not.toThrow();
+      await expect(hasProcessStopped(zombie)).resolves.toBe(true);
+      await expect(hasProcessStopped(parent.pid!)).resolves.toBe(false);
+    } finally {
+      parent.stdin?.end("reap");
+      await finished;
     }
   },
 );
