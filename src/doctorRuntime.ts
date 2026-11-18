@@ -1,3 +1,8 @@
+import {
+  BINARY_NINJA_DOCTOR_SETTINGS,
+  inspectBinaryNinjaRegistration,
+} from "./binaryNinja/BinaryNinjaDoctor.js";
+import { readBinaryNinjaConfiguration } from "./binaryNinja/BinaryNinjaConfiguration.js";
 import { HOST_PLATFORM, type HostPlatform } from "./platform/HostPlatform.js";
 import { systemDoctorHost, type DoctorHost } from "./application/Doctor.js";
 import type {
@@ -182,6 +187,7 @@ const readSelectedRegistration = async (
 const PROVIDER_SETTINGS: Readonly<Record<string, readonly string[]>> = {
   ghidra: GHIDRA_DOCTOR_SETTINGS,
   ida: IDA_DOCTOR_SETTINGS,
+  "binary-ninja": BINARY_NINJA_DOCTOR_SETTINGS,
   jadx: JADX_DOCTOR_SETTINGS,
   kuna: KUNA_DOCTOR_SETTINGS,
 };
@@ -354,6 +360,32 @@ export const createSystemDoctorHost = (
     }
     return registration;
   };
+  const binaryNinjaReads = new WeakMap<
+    RetainedResourceScope,
+    Map<string, ReturnType<typeof readBinaryNinjaConfiguration>>
+  >();
+  const readBinaryNinjaRegistration = (
+    path: string,
+    resourceScope: RetainedResourceScope,
+    signal: AbortSignal,
+  ) => {
+    let byPath = binaryNinjaReads.get(resourceScope);
+    if (byPath === undefined) {
+      byPath = new Map();
+      binaryNinjaReads.set(resourceScope, byPath);
+    }
+    let registration = byPath.get(path);
+    if (registration === undefined) {
+      registration = withProbeResourceScope(resourceScope, path, (probeScope) =>
+        readBinaryNinjaConfiguration(path, {
+          resourceScope: probeScope,
+          signal,
+        }),
+      );
+      byPath.set(path, registration);
+    }
+    return registration;
+  };
   return systemDoctorHost({
     environment,
     platform,
@@ -365,20 +397,39 @@ export const createSystemDoctorHost = (
       resourceScope,
       inspectionSignal,
     ) => {
-      if (analysisProvider !== "ida" && analysisProvider !== "auto")
+      if (
+        analysisProvider !== "ida" &&
+        analysisProvider !== "binary-ninja" &&
+        analysisProvider !== "auto"
+      )
         return ok(undefined);
-      const path = registrationEnvironment.REA_IDA_MCP_CONFIG;
-      if (path === undefined) return ok(undefined);
-      const registration = await readRegistration(
-        path,
-        resourceScope,
-        inspectionSignal,
-      );
-      if (registration.ok) return ok(registration.value.timeoutMs);
-      // An invalid IDA registration cannot be selected automatically. Keep it
-      // out of recommendations for another available provider, but surface the
-      // parser-owned error when IDA itself was explicitly selected.
-      return analysisProvider === "ida" ? registration : ok(undefined);
+      const providers = {
+        ida: { setting: "REA_IDA_MCP_CONFIG", read: readRegistration },
+        "binary-ninja": {
+          setting: "REA_BINARY_NINJA_MCP_CONFIG",
+          read: readBinaryNinjaRegistration,
+        },
+      } as const;
+      const candidates =
+        analysisProvider === "auto"
+          ? [providers.ida, providers["binary-ninja"]]
+          : [providers[analysisProvider]];
+      let budget: number | undefined;
+      for (const provider of candidates) {
+        const path = registrationEnvironment[provider.setting];
+        if (path === undefined) continue;
+        const registration = await provider.read(
+          path,
+          resourceScope,
+          inspectionSignal,
+        );
+        if (registration.ok)
+          budget = Math.max(budget ?? 0, registration.value.timeoutMs);
+        // Invalid registrations cannot be selected automatically. Explicit
+        // selection still reports the parser-owned error.
+        else if (analysisProvider !== "auto") return registration;
+      }
+      return ok(budget);
     },
     providerInspections: async (
       resourceScope: RetainedResourceScope,
@@ -410,6 +461,12 @@ export const createSystemDoctorHost = (
       );
       const idaUnresolved = unresolvedProvider(
         "ida",
+        selected,
+        inspectionEnvironment,
+        platform,
+      );
+      const binaryNinjaUnresolved = unresolvedProvider(
+        "binary-ninja",
         selected,
         inspectionEnvironment,
         platform,
@@ -454,6 +511,26 @@ export const createSystemDoctorHost = (
                       inspectionSignal,
                     ),
               ),
+            ),
+        binaryNinjaUnresolved !== undefined
+          ? Promise.resolve(binaryNinjaUnresolved)
+          : withProbeResourceScope(
+              resourceScope,
+              "binary-ninja-doctor",
+              (probeScope) =>
+                inspectBinaryNinjaRegistration(
+                  inspectionEnvironment.REA_BINARY_NINJA_MCP_CONFIG,
+                  probeScope,
+                  inspectionSignal,
+                  inspectionEnvironment.REA_BINARY_NINJA_MCP_CONFIG ===
+                    undefined
+                    ? undefined
+                    : readBinaryNinjaRegistration(
+                        inspectionEnvironment.REA_BINARY_NINJA_MCP_CONFIG,
+                        resourceScope,
+                        inspectionSignal,
+                      ),
+                ),
             ),
         jadxUnresolved !== undefined
           ? Promise.resolve(jadxUnresolved)
