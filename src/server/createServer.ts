@@ -7,6 +7,7 @@ import { registerToolFamilies } from "../contracts/toolFamilyIds.js";
 import { SCOPED_NO_TARGET_RECOVERY } from "./recoveryInstructions.js";
 import { AnalysisSettings } from "../application/AnalysisSettings.js";
 import { parseMcpInputBudget } from "../config/mcpInputBudget.js";
+import { parseMcpToolsListPageBudget } from "../config/mcpToolsListPageBudget.js";
 import { serverInstructions } from "./serverInstructions.js";
 import { registerServiceTools } from "./serviceToolBindings.js";
 import {
@@ -91,9 +92,12 @@ const createMcpServer = (
   outputSchemaProfile: McpOutputSchemaProfile,
   advertisedToolFamilies: ReadonlySet<string> | undefined,
   inputElementBudget: string | undefined,
+  toolsListPageBudget: string | undefined,
 ): EvidenceMcpServer => {
   const configured = parseMcpInputBudget(inputElementBudget);
   if (!configured.ok) throw configured.error;
+  const pageBudget = parseMcpToolsListPageBudget(toolsListPageBudget);
+  if (!pageBudget.ok) throw pageBudget.error;
   return new EvidenceMcpServer(
     {
       name: PRODUCT_IDENTITY.mcpServerKey,
@@ -119,6 +123,7 @@ const createMcpServer = (
       advertisedToolFamilies,
     ),
     advertisedToolFamilies,
+    pageBudget.value,
   );
 };
 
@@ -238,6 +243,7 @@ export const createServer = (
       selectedOutputSchemaProfile,
       advertisedToolFamilies,
       environment.REA_MCP_MAX_INPUT_ELEMENTS,
+      environment.REA_MCP_TOOLS_LIST_PAGE_BYTES,
     );
   server.analysisSettings = analysisSettings;
   if (options.mcpServer !== undefined) {

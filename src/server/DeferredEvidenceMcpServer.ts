@@ -14,6 +14,7 @@ import {
   currentMcpRequestSignal,
   type StandardToolRegistration,
 } from "./EvidenceMcpServerCore.js";
+import type { McpToolsListPageBudget } from "../config/mcpToolsListPageBudget.js";
 import { promptArgumentsSchema } from "./promptArguments.js";
 import { SERVER_START_FAILED } from "../main/messages.js";
 
@@ -66,6 +67,8 @@ export class DeferredEvidenceMcpServer extends EvidenceMcpServerCore {
       // Recorded tools carry their presented schemas. The selected presentation
       // still applies to transport discovery, which is not recorded.
       readonly compactPresentation?: CompactInputSchemaPresentation | undefined;
+      /** Selected tools/list page budget; absent keeps the default page. */
+      readonly toolsListPageBudget?: McpToolsListPageBudget | undefined;
       readonly identity?: RecordedMcpCatalog["identity"] | undefined;
     } = {},
   ) {
@@ -86,6 +89,8 @@ export class DeferredEvidenceMcpServer extends EvidenceMcpServerCore {
       // structured results.
       "off",
       options.identity ?? catalog.identity,
+      undefined,
+      options.toolsListPageBudget,
     );
     for (const name of catalog.evidenceReferenceAlternatives)
       this.registerEvidenceReferenceAlternative(name);
