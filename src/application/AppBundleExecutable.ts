@@ -6,6 +6,7 @@ import { z } from "zod";
 import { preflightPropertyListDecode } from "../domain/apple/propertyListDecodeBudget.js";
 import { decodeBinaryPropertyList } from "../domain/apple/binaryPlistMaterializer.js";
 import { BinaryTargetError } from "../domain/configurationErrors.js";
+import { InternalInvariantError } from "../domain/internalInvariant.js";
 import { isPathWithinRoot } from "../domain/localPath.js";
 import { parseXmlPropertyList } from "../domain/propertyListKeys.js";
 import { decodeXmlPlistText } from "../domain/propertyListXmlText.js";
@@ -111,6 +112,8 @@ const resolveAppBundleExecutable = async (
         );
     }
   } catch (cause: unknown) {
+    // A broken internal assumption is a REA defect, not a fact about the bundle.
+    if (cause instanceof InternalInvariantError) throw cause;
     if (cause instanceof BinaryTargetError) return err(cause);
     return err(
       new BinaryTargetError(path, errorReason(cause, path), { cause }),
@@ -161,6 +164,8 @@ export const resolveAppleBundleExecutable = async (
       );
     return await resolveLayoutExecutable(path, layout.value, fileSystem);
   } catch (cause: unknown) {
+    // A broken internal assumption is a REA defect, not a fact about the bundle.
+    if (cause instanceof InternalInvariantError) throw cause;
     if (cause instanceof BinaryTargetError) return err(cause);
     return err(
       new BinaryTargetError(path, errorReason(cause, path), { cause }),
@@ -444,6 +449,7 @@ const resolveLayoutExecutable = async (
   try {
     name = executableName(decodeInfoPlistValue(plist, ["CFBundleExecutable"]));
   } catch (cause: unknown) {
+    if (cause instanceof InternalInvariantError) throw cause;
     return err(
       new BinaryTargetError(
         plistPath,
